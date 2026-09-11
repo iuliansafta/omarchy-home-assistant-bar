@@ -4,7 +4,7 @@ Native Omarchy/Quickshell plugin for Home Assistant lights grouped by area, with
 
 ![Home Assistant plugin panel](preview.png)
 
-**Publication preparation only:** manifest version `0.1.0` is not a validated release. Licensed under [MIT](LICENSE). Owner approval of attribution, historical privacy review, and live acceptance is required before publication. See [SECURITY.md](SECURITY.md).
+**Pre-release:** manifest version `0.1.0` is not yet a validated plugin release. Licensed under [MIT](LICENSE). Live host acceptance is required before tagging a release. See [SECURITY.md](SECURITY.md).
 
 ## Requirements and compatibility
 
