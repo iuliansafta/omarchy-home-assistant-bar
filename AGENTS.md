@@ -1,6 +1,6 @@
 # Repository Context
 
-- This is a native Omarchy/Quickshell plugin, not Waybar or a standalone QML app. `plugin/manifest.json` mounts `Service.qml` once per shell and `BarWidget.qml` per monitor; widgets obtain the shared service via `bar.shell.serviceFor("iulian.home-assistant")`. Keep IPC handlers on the service to avoid per-monitor collisions.
+- This is a native Omarchy/Quickshell plugin, not Waybar or a standalone QML app. Root `manifest.json` points to `plugin/Service.qml` (mounted once per shell) and `plugin/BarWidget.qml` (mounted per monitor); widgets obtain the shared service via `bar.shell.serviceFor("iulian.home-assistant")`. Keep IPC handlers on the service to avoid per-monitor collisions.
 - `controller/omarchy_ha_controller.py` owns authentication, keyring, HA WebSocket, and newline-delimited JSON IPC. `bin/omarchy-ha` forwards arguments through IPC; the controller validates them with `cli_guard.py` and spawns `hass-cli`. The widget does not use CLI polling.
 - `spike/` is the mock compatibility harness, not the current controller. `INTEGRATION_PLAN.md` is historical intent; `SPIKE_NOTES.md` records bring-up findings chronologically. Later findings supersede earlier ones; executable code wins over prose.
 
@@ -31,7 +31,7 @@ python -m pytest -p no:cacheprovider -q controller/tests
 - Controller runtime uses `/usr/bin/python3` via `controller/.venv` with `--system-site-packages`, requiring system `aiohttp` and `keyring`. PATH Python may be shadowed by mise. Separately, `homeassistant-cli==1.0.0` needs the installer's Python 3.13 environment: its async commands fail on 3.14.
 - The CLI installer and controller honor `XDG_DATA_HOME` (default `~/.local/share`) for `omarchy-home-assistant/hass-cli-venv/bin/hass-cli`; ensure the systemd user service receives the same XDG environment, or set `OMARCHY_HA_HASS_CLI` on the controller explicitly.
 - Set `XDG_RUNTIME_DIR`; controller and CLI use `$XDG_RUNTIME_DIR/omarchy-ha/controller.sock`. `OMARCHY_HA_SOCKET` overrides only the QML client. Never start a second controller against the live runtime directory: startup unlinks the socket.
-- Plugin installation is `~/.config/omarchy/plugins/iulian.home-assistant` pointing to `plugin/`, with its ID present in `~/.config/omarchy/shell.json`. Do not edit `/usr/share/omarchy/` for installation.
+- Public plugin installation is `omarchy plugin add <git-url> --enable`, which clones the repository to `~/.config/omarchy/plugins/iulian.home-assistant`; root `manifest.json` keeps QML under `plugin/`. The separate controller installer must then be run from that clone. Do not edit `/usr/share/omarchy/` for installation.
 - After plugin QML/JS edits, use `omarchy-restart-shell` for live verification. Symlink recreation and rescanning proved unreliable at clearing cached components (see the updated dev-loop finding in `SPIKE_NOTES.md`).
 - For installed controller changes: `systemctl --user restart omarchy-home-assistant.service`; logs: `journalctl --user -u omarchy-home-assistant -f`. Restarts affect the live desktop session. Real light-control tests require explicit user approval.
 

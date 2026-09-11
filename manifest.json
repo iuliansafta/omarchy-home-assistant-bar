@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "iulian.home-assistant",
+  "name": "Home Assistant",
+  "version": "0.1.0",
+  "author": "Iulian Safta",
+  "description": "Home Assistant light controls grouped by area for the Omarchy bar.",
+  "homepage": "https://github.com/iuliansafta/omarchy-home-assistant-bar",
+  "license": "MIT",
+  "kinds": ["service", "bar-widget"],
+  "entryPoints": {
+    "service": "plugin/Service.qml",
+    "barWidget": "plugin/BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Home Assistant",
+    "description": "Control Home Assistant lights by area from the Omarchy bar.",
+    "category": "Home",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {},
+    "schema": []
+  }
+}
