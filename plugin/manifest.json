@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "iulian.home-assistant",
+  "name": "Home Assistant",
+  "version": "0.1.0",
+  "author": "Iulian Safta",
+  "description": "Home Assistant lights grouped by area",
+  "kinds": ["service", "bar-widget"],
+  "entryPoints": {"service": "Service.qml", "barWidget": "BarWidget.qml"},
+  "barWidget": {
+    "displayName": "Home Assistant",
+    "category": "Home",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {},
+    "schema": []
+  }
+}

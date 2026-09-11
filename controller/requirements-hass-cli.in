@@ -1,0 +1,6 @@
+# hass-cli dependency set used by controller/install.sh.
+#
+# Edit this file, then regenerate the hash-pinned lock:
+#   uv pip compile --python-version 3.13 --generate-hashes \
+#     controller/requirements-hass-cli.in -o controller/requirements-hass-cli.txt
+homeassistant-cli==1.0.0
