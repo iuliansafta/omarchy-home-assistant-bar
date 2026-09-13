@@ -246,6 +246,8 @@ class Controller:
         self.reconnect_delay_ms = RECONNECT_BASE_MS
         self.reconnect_timer: asyncio.TimerHandle | None = None
         self.refresh_timer: asyncio.TimerHandle | None = None
+        self._refresh_task: asyncio.Task | None = None
+        self._states_request_id: int | None = None
         self.stopping = False
 
         self.session_generation = 0
@@ -829,10 +831,18 @@ class Controller:
         if self.refresh_timer:
             self.refresh_timer.cancel()
         delay = max(30, int(expires_in * 0.75))
-        self.refresh_timer = loop.call_later(delay, lambda: asyncio.create_task(self.refresh_access_token()))
+        async def refresh(generation: int) -> None:
+            if generation == self.session_generation and not self.stopping:
+                await self.refresh_access_token(force=True)
+
+        def start_refresh() -> None:
+            self.refresh_timer = None
+            self._refresh_task = asyncio.create_task(refresh(self.session_generation))
+
+        self.refresh_timer = loop.call_later(delay, start_refresh)
 
     async def refresh_access_token(self, force: bool = False) -> bool:
-        if not self.refresh_token or not self.base_url:
+        if self.stopping or not self.refresh_token or not self.base_url:
             return False
         if not force and self.access_token and time.monotonic() < self.access_expires_at - REFRESH_MARGIN_S:
             return True
@@ -848,21 +858,27 @@ class Controller:
                  "client_id": client_id}
             )
         except TokenError as exc:
-            if generation != self.session_generation:
+            if generation != self.session_generation or self.stopping:
                 return False
             log.warning("token refresh failed: %s", exc.kind)
             if exc.kind == "invalid_grant":
                 # Revoked/expired: stop retrying, ask the user to reconnect.
                 self.refresh_token = None
+                if self.refresh_timer:
+                    self.refresh_timer.cancel()
+                    self.refresh_timer = None
                 if self.keyring:
                     secret_delete(self.keyring)
                 self.set_status("credentials_invalid", "Session expired; sign in again")
             else:
                 self.set_status("offline", "Could not refresh session")
+                self.schedule_refresh(0)  # Retry transient failures after 30 seconds.
             return False
-        if generation != self.session_generation:
+        if generation != self.session_generation or self.stopping:
             return False
         self.apply_access_token(tokens)
+        if self.ws_connected and self._live_ws is not None and not self._live_ws.closed:
+            self.set_status("connected", self.registry_status_detail())
         log.info("access token refreshed")
         return True
     # ---- websocket ----------------------------------------------------------
@@ -987,17 +1003,20 @@ class Controller:
                 if isinstance(st, dict) and str(st.get("entity_id", "")).startswith("light.")
             )
             log.info("get_states: %d entities, %d lights", len(result), light_count)
-            self.apply_states(result)
+            # The reader applies get_states before processing subsequent events.
             # Always finish bootstrap with one complete snapshot. The topology
             # may equal cached data, in which case change detection alone would
             # leave existing widget clients with empty pre-sign-in state.
             await self.fetch_registries(force_snapshot=True)
-            self.set_status("connected", "")
+            self.set_status("connected", self.registry_status_detail())
             await reader_task
         finally:
             self.ws_connected = False
             self._live_ws = None
             reader_task.cancel()
+
+    def registry_status_detail(self) -> str:
+        return "Registry access limited — lights grouped as Unassigned" if self._registry_limited else ""
 
     async def fetch_registries(self, force_snapshot: bool = False) -> None:
         """Load area/device/entity registries; degrade gracefully without them.
@@ -1028,8 +1047,7 @@ class Controller:
         if force_snapshot:
             self.broadcast(self.snapshot_message())
         if failed:
-            detail = "Registry access limited — lights grouped as Unassigned"
-            self.set_status("connected", detail)
+            self.set_status("connected", self.registry_status_detail())
         else:
             log.info(
                 "registries: %d areas, %d devices, %d entities",
@@ -1070,6 +1088,9 @@ class Controller:
                 elif mtype == "result":
                     fut = self.reply_futures.pop(data.get("id"), None)
                     if fut and not fut.done():
+                        if data.get("id") == self._states_request_id and data.get("success", True):
+                            # Commit the snapshot in wire order, before later events.
+                            self.apply_states(data.get("result") or [])
                         fut.set_result(data)
                 # pong/other types ignored
             elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.ERROR):
@@ -1091,16 +1112,23 @@ class Controller:
         if ws is None or ws.closed:
             self.reply_futures.pop(req_id, None)
             return None
+        if payload.get("type") == "get_states":
+            self._states_request_id = req_id
         try:
             await ws.send_json(payload)
             return await asyncio.wait_for(fut, timeout=timeout)
         except (asyncio.TimeoutError, ConnectionResetError):
             self.reply_futures.pop(req_id, None)
             return None
+        finally:
+            if self._states_request_id == req_id:
+                self._states_request_id = None
 
     # ---- state handling -------------------------------------------------------
 
     def apply_states(self, states: list) -> None:
+        self._states = {}
+        self._state_attrs = {}
         for st in states or []:
             if not isinstance(st, dict):
                 continue
@@ -1230,6 +1258,9 @@ class Controller:
         self.ws_connected = False
         self._live_ws = None
         self.cancel_browser_auth()
+        if self._refresh_task:
+            self._refresh_task.cancel()
+            self._refresh_task = None
         if self.refresh_timer:
             self.refresh_timer.cancel()
             self.refresh_timer = None
@@ -1290,6 +1321,13 @@ class Controller:
 
     async def aclose(self) -> None:
         self.stopping = True
+        if self.refresh_timer:
+            self.refresh_timer.cancel()
+            self.refresh_timer = None
+        if self._refresh_task:
+            self._refresh_task.cancel()
+            await asyncio.gather(self._refresh_task, return_exceptions=True)
+            self._refresh_task = None
         if self.ws_task:
             self.ws_task.cancel()
         if self.http_session:

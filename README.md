@@ -1,76 +1,138 @@
-# Omarchy Home Assistant bar
+# Omarchy Home Assistant
 
-Control Home Assistant lights by area directly from the Omarchy 4.0 bar. The native Quickshell widget uses a shared Python controller for secure authentication and live state; it is not a Waybar module or standalone QML app.
+Home Assistant lights as a native [Omarchy 4.0](https://omarchy.org/) bar widget.
 
-![Home Assistant plugin panel](preview.png)
+![Home Assistant bar widget with the light controls open](preview.png)
 
-**Pre-release:** manifest version `0.1.0` is not yet a validated plugin release. Licensed under [MIT](LICENSE). Live host acceptance is required before tagging a release. See [SECURITY.md](SECURITY.md).
+Control lights by area without leaving your desktop. Sign in once through your browser, then manage your lights from the bar with live Home Assistant state.
 
-## Requirements and compatibility
+## Features
 
-- Omarchy 4.0 with its Quickshell plugin host (`qs.Ui`, `qs.Commons`, service and bar-widget entry points, and `bar.shell.serviceFor`).
-- Linux user session with systemd user services, `XDG_RUNTIME_DIR`, D-Bus and an unlocked Secret Service keyring (GNOME Keyring). The controller pins the Secret Service backend, not KWallet.
-- `/usr/bin/python3` with venv support, system `aiohttp` and `keyring`; browser plus `xdg-open`. Recorded bring-up: Python 3.14.7, aiohttp 3.13.5, keyring 25.7.0. aiohttp must provide `ClientWSTimeout`; final WebSocket origin validation currently uses its internal response URL, tested with 3.13.5.
-- `uv` or Python 3.13 to provision hash-pinned `homeassistant-cli==1.0.0`. Its async commands do not work with Python 3.14. Controller and CLI have separate environments.
-- Home Assistant with browser authorization and WebSocket APIs; recorded bring-up used HA 2026.9.1. No minimum HA version has been established.
+- Compact home icon, highlighted while any selected light is on
+- Lights grouped by Home Assistant area
+- Individual light switches and area-wide on/off controls
+- Brightness sliders, color presets, hue/saturation and white temperature for supported lights
+- Area and individual-light selection, saved across restarts
+- Available/unavailable filters and keyboard navigation
+- Live state updates over Home Assistant WebSocket, without CLI polling
+- Browser sign-in with refresh tokens stored in Secret Service
+- Shared controller across monitors
+- An `omarchy-ha` launcher for validated `hass-cli` commands
+
+## Requirements
+
+- Omarchy 4.0 with its Quickshell plugin host
+- Home Assistant with browser authorization and WebSocket APIs
+- A running, unlocked Secret Service keyring, such as GNOME Keyring
+- System Python (`/usr/bin/python3`) with venv support, `aiohttp` (with `ClientWSTimeout` support) and `keyring`
+- `uv` or Python 3.13 to install the pinned `homeassistant-cli==1.0.0` environment
+- A systemd user session, D-Bus, `XDG_RUNTIME_DIR`, a browser and `xdg-open`
+
+The installer checks for system dependencies but does not install them. It creates separate environments for the controller and CLI, using Python 3.13 for `hass-cli`. See [compatibility notes](docs/DEVELOPMENT.md#compatibility-and-live-verification) for tested versions.
 
 ## Install
 
-Install and enable the plugin through Omarchy:
+Install and enable the plugin:
 
 ```bash
 omarchy plugin add https://github.com/iuliansafta/omarchy-home-assistant-bar.git --enable
 ```
 
-The widget uses a separate controller because credentials never live in QML. Install and start it from the plugin clone:
+Then install its controller from the plugin checkout:
 
 ```bash
 bash ~/.config/omarchy/plugins/iulian.home-assistant/controller/install.sh
 ```
 
-The second command provisions environments, writes a systemd user unit and launcher symlink, and **enables/starts** `omarchy-home-assistant.service`. It may download the hash-pinned `hass-cli` environment. Omarchy intentionally does not run plugin install hooks, so this explicit controller step is required.
+This creates the Python environments, installs the `omarchy-ha` launcher and enables/starts `omarchy-home-assistant.service`. It may download Python 3.13 and the hash-pinned CLI dependencies. Omarchy does not run plugin install hooks, so **both steps are required**.
 
-Open the widget, enter the HA base URL, and sign in through the browser. Prefer **HTTPS**: HTTP is supported but sends credentials in plaintext over the network. Unlock the keyring if prompted, then choose areas/lights.
+### First launch and sign-in
 
-Paths default to `~/.config/omarchy-home-assistant/config.json`, `~/.local/share/omarchy-home-assistant/hass-cli-venv`, and `~/.local/bin/omarchy-ha`. Installer paths honor `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and `XDG_BIN_HOME` respectively. The controller must receive the same XDG environment in its systemd user service; shell exports alone do not ensure that. `OMARCHY_HA_HASS_CLI` on the controller overrides CLI discovery. IPC uses `$XDG_RUNTIME_DIR/omarchy-ha/controller.sock`; `OMARCHY_HA_SOCKET` overrides only the QML client.
+1. Click the home icon in the bar.
+2. Enter your Home Assistant base URL, preferably `https://…`.
+3. Sign in through the browser and unlock your keyring if prompted.
+4. Choose the areas or individual lights to show.
 
-## Usage and behavior
+The saved URL and selection live in `~/.config/omarchy-home-assistant/config.json`. See [SECURITY.md](SECURITY.md) for credential storage, connection security and vulnerability reporting.
 
-The controller streams HA state; widgets do not poll the CLI. Area actions send explicit selected, visible, available light IDs, not HA whole-area targets. Offline actions are rejected, never replayed. Service acceptance is not observed light state.
+## Controls
 
-Read-only CLI examples: `omarchy-ha info`, `omarchy-ha area list`, `omarchy-ha state get light.example`. Only validated commands/options are forwarded. CLI output has a combined 512 KiB collection ceiling and a 60-second timeout; overflow/timeout terminates the child and returns an error. Credential/debug options are rejected.
+- **Click the bar icon:** open or close the light panel.
+- **Light switch:** turn an individual light on or off.
+- **Area controls:** turn the selected, available lights in that area on or off.
+- **Brightness:** adjust a supported light with its slider.
+- **Color controls:** expand a supported light to choose colors or white temperature.
+- **Keyboard:** navigate light rows with Up/Down; Left/Right adjusts brightness on a selected dimmable light. Activate to switch the selected light; Escape closes the panel.
 
-Widgets exist per monitor with a single shared service/IPC target. Panel requests currently reach all connected widget instances; focused-monitor routing is not guaranteed. Multi-monitor behavior needs live verification.
+Selecting an area includes its lights; individual selections add lights outside those areas. **An empty selection means all lights**, not none. To exclude one light from an area, select that area's individual lights instead of the whole area.
 
-## Upgrade and uninstall
+Hidden, disabled and aggregate-group lights are excluded. Lights without an area appear under **Unassigned**. Area actions target explicit light IDs rather than Home Assistant's entire area, so they do not affect lights outside your selection.
 
-Update the plugin checkout with:
+The panel reflects the state reported by Home Assistant. Controls are unavailable while offline, and missed actions are never replayed.
+
+### Command line
+
+With `~/.local/bin` on your `PATH`, read-only examples are:
+
+```bash
+omarchy-ha info
+omarchy-ha area list
+omarchy-ha state get light.example
+```
+
+Replace `light.example` with an entity ID from your Home Assistant instance. The launcher forwards supported commands through the running controller; see [CLI behavior and limits](docs/DEVELOPMENT.md#architecture).
+
+## Update
 
 ```bash
 omarchy plugin update iulian.home-assistant
+bash ~/.config/omarchy/plugins/iulian.home-assistant/controller/install.sh
+systemctl --user restart omarchy-home-assistant.service
 ```
 
-Then rerun `controller/install.sh` from the installed plugin path and restart `omarchy-home-assistant.service`. The installer **skips CLI provisioning if the executable exists** and `enable --now` does not explicitly restart an already-running controller. To apply a changed CLI lock, stop the service, remove/recreate only its dedicated `hass-cli-venv` under your resolved data directory, and rerun the installer. QML/JS changes should reload through Omarchy; if they remain cached, run `omarchy-restart-shell`. These commands affect the live desktop.
+The explicit restart applies controller changes to an already-running service. If QML/JS remains cached, run `omarchy-restart-shell` to reload the desktop shell.
 
-To uninstall deliberately:
+The installer skips CLI provisioning when `hass-cli` already exists. If an update changes the CLI lock file, stop the service and recreate only its dedicated `hass-cli-venv` before rerunning the installer. Inspect the [resolved paths](docs/DEVELOPMENT.md#runtime-paths) first, especially with custom XDG settings.
 
-1. While the controller/keyring are available, use widget **Sign out**. If server revocation fails, revoke the session in your Home Assistant profile too. Verify deletion of the Secret Service entry (service `omarchy-home-assistant`, account `ha-refresh-token`) with your keyring manager; deleting config does not delete keyring credentials.
-2. Run `systemctl --user disable --now omarchy-home-assistant.service`; remove its unit from your resolved XDG config directory's `systemd/user/`, then run `systemctl --user daemon-reload`.
-3. Remove the launcher symlink from your resolved XDG bin directory, the installed plugin's `controller/.venv`, and optionally the dedicated CLI venv and non-secret config directory. Inspect resolved paths before deletion. Do not delete unrelated user data.
-4. Remove the plugin with `omarchy plugin remove iulian.home-assistant`.
+## Troubleshooting
 
-## Troubleshooting and offline checks
+Check the controller:
 
-Use `systemctl --user status omarchy-home-assistant.service` and `journalctl --user -u omarchy-home-assistant -f`. Do not post raw logs/config/history without reviewing private URLs, identities and credentials. Never start a second controller against the live runtime directory: startup unlinks the socket. `controller/ipc_client.py` is a developer tool that connects to the running controller, not an offline test runner.
-
-From the checkout, with pytest, aiohttp, keyring and Node available:
-
-```sh
-PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
-python -m pytest -p no:cacheprovider -q -rs controller/tests
-bash -n controller/install.sh controller/render_systemd_unit.sh
+```bash
+systemctl --user status omarchy-home-assistant.service
+journalctl --user -u omarchy-home-assistant -f
 ```
 
-If PATH Python lacks system packages, use the dependency-aware `PYTHONPATH` command in [AGENTS.md](AGENTS.md). Confirm zero skips (aiohttp and Node modules can otherwise skip). Tests use mocks, temporary sockets, loopback servers and disposable subprocesses, not live HA/keyring/device actions. CI does not validate QML, installation or hardware.
+- **Dependency check fails:** make sure `aiohttp` and `keyring` are installed for `/usr/bin/python3`, not just another Python on your `PATH`.
+- **Sign-in cannot be saved:** check that Secret Service is running and unlocked. The controller deliberately uses Secret Service, not KWallet.
+- **CLI is not found:** check `~/.local/bin` is on `PATH` and the controller's CLI environment exists.
+- **Custom XDG directories:** the systemd user service must receive the same settings as the installer. See [runtime paths](docs/DEVELOPMENT.md#runtime-paths).
+- **Multiple monitors:** widgets share state, but opening the panel through IPC can open it on multiple monitors rather than only the focused monitor.
 
-Before any version/tag/release: complete independent security review, owner attribution and reachable-history privacy decisions, record exact host versions, and obtain explicit permission for fresh-install, QML/multi-monitor, reconnect and real light-control acceptance. Then agree release notes and version/tag; no automatic publishing workflow is provided.
+Do not start another controller manually against the live runtime directory; it would unlink the active socket.
+
+## Remove
+
+1. Use **Sign out** while the controller and keyring are available. See [credential cleanup](SECURITY.md#credential-cleanup) if signout fails.
+2. Stop and disable the controller:
+
+   ```bash
+   systemctl --user disable --now omarchy-home-assistant.service
+   ```
+
+3. Remove its unit (`~/.config/systemd/user/omarchy-home-assistant.service`) and launcher symlink (`~/.local/bin/omarchy-ha`), then run `systemctl --user daemon-reload`. Adjust paths for custom XDG settings.
+4. Remove the plugin:
+
+   ```bash
+   omarchy plugin remove iulian.home-assistant
+   ```
+
+The CLI environment at `~/.local/share/omarchy-home-assistant/hass-cli-venv` and non-secret configuration at `~/.config/omarchy-home-assistant` may remain. Remove them manually only if no longer needed.
+
+## Development
+
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for architecture, offline tests and runtime paths.
+
+## License
+
+[MIT](LICENSE)
